@@ -5,6 +5,7 @@ import pandas as pd
 
 class IntesaExcelProvider:
     name = "intesa_excel"
+    bank_label = "ISP"
 
     def _read_with_header_detection(self, file_obj) -> pd.DataFrame:
         expected_tokens = [
@@ -140,6 +141,7 @@ class IntesaExcelProvider:
                 "account": str(row.get("Conto o carta", "")).strip(),
                 "currency": str(row.get("Valuta", "")).strip(),
                 "category_hint": str(row.get("Categoria", "")).strip(),
+                "bank": self.bank_label,
                 "original": {k: (None if pd.isna(v) else str(v)) for k, v in row.to_dict().items()},
             }
             if data["transaction_date"] and data["amount"] is not None and data["description"]:

@@ -332,3 +332,17 @@ class DatabaseManager:
             conn.commit()
         logger.info(f"Default categories setup completed. Created: {created}")
         return created
+
+    def reset_database(self):
+        """Reset the entire database - DANGEROUS!"""
+        with sqlite3.connect(self.db_path) as conn:
+            # Drop all tables
+            conn.execute("DROP TABLE IF EXISTS partner_balances")
+            conn.execute("DROP TABLE IF EXISTS transactions")
+            conn.execute("DROP TABLE IF EXISTS categories")
+            conn.execute("DROP TABLE IF EXISTS users")
+
+            # Recreate tables
+            self._create_tables()
+            conn.commit()
+        logger.warning("Database has been completely reset!")

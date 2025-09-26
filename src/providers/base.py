@@ -3,6 +3,7 @@ from typing import Any, Dict, Iterable, Protocol
 
 class TransactionProvider(Protocol):
     name: str
+    bank_label: str
 
     def parse(self, file_obj) -> Iterable[Dict[str, Any]]: ...
 
