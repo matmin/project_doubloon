@@ -1,0 +1,28 @@
+{
+  "banks": {
+    "intesa_sanpaolo": {
+      "name": "Intesa Sanpaolo",
+      "csv_delimiter": ";",
+      "encoding": "utf-8",
+      "date_format": "%d/%m/%Y",
+      "columns_mapping": {
+        "date": "Data",
+        "description": "Descrizione",
+        "amount": "Importo",
+        "balance": "Saldo"
+      }
+    },
+    "unicredit": {
+      "name": "UniCredit",
+      "csv_delimiter": ",",
+      "encoding": "utf-8",
+      "date_format": "%d-%m-%Y",
+      "columns_mapping": {
+        "date": "Data Operazione",
+        "description": "Causale",
+        "amount": "Importo",
+        "balance": "Saldo"
+      }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+.build/
+.dist/
+.python-version
+
+# Environments
+.venv/
+venv/
+.env
+.env.*
+
+# OS
+.DS_Store
+
+# Data and artifacts
+/data/**
+!data/csv_examples/
+!data/csv_examples/*.csv
+*.db
+*.sqlite
+
+# Logs
+logs/
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Alembic
+alembic/versions/*.pyc
+
+# Streamlit
+.streamlit/
+
+# Coverage
+.coverage
+htmlcov/
+
+# VSCode / IDE
+.vscode/
+.idea/

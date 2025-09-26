@@ -1,0 +1,24 @@
+{
+  "categories": [
+    {
+      "name": "Necessità",
+      "type": "necessity",
+      "subcategories": ["Affitto/Mutuo", "Bollette", "Spesa Alimentare", "Trasporti", "Assicurazioni", "Telefono/Internet"]
+    },
+    {
+      "name": "Extra",
+      "type": "extra",
+      "subcategories": ["Ristoranti", "Shopping", "Intrattenimento", "Viaggi", "Hobby", "Salute/Benessere"]
+    },
+    {
+      "name": "Investimenti",
+      "type": "investment",
+      "subcategories": ["Scalable Capital", "Trade Republic", "Altri Investimenti", "Pensione Integrativa"]
+    },
+    {
+      "name": "Trasferimenti",
+      "type": "transfer",
+      "subcategories": ["Bonifici", "Ricariche", "Rimborsi", "Prelievi ATM"]
+    }
+  ]
+}
