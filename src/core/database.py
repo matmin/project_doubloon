@@ -30,18 +30,32 @@ class DatabaseManager:
                 conn.close()
 
     def _initialize_database(self):
-        if not self.db_path.exists():
-            logger.info("Creating database...")
-            schema_path = Path(__file__).parent.parent.parent / "database_schema.sql"
-            if schema_path.exists():
-                with open(schema_path, "r", encoding="utf-8") as f:
-                    schema_sql = f.read()
+        schema_path = Path(__file__).parent.parent.parent / "database_schema.sql"
+        if not schema_path.exists():
+            raise FileNotFoundError(f"database_schema.sql not found at {schema_path}")
+
+        # Check if database exists and has tables
+        db_needs_creation = not self.db_path.exists()
+        if not db_needs_creation:
+            # Check if tables exist
+            try:
                 with self.get_connection() as conn:
-                    conn.executescript(schema_sql)
-                    conn.commit()
-                logger.info("Database schema created")
-            else:
-                raise FileNotFoundError("database_schema.sql not found")
+                    cursor = conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
+                    )
+                    if not cursor.fetchone():
+                        db_needs_creation = True
+            except Exception:
+                db_needs_creation = True
+
+        if db_needs_creation:
+            logger.info("Creating database...")
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema_sql = f.read()
+            with self.get_connection() as conn:
+                conn.executescript(schema_sql)
+                conn.commit()
+            logger.info("Database schema created")
 
     def create_user(self, name, email):
         with self.get_connection() as conn:
