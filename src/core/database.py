@@ -335,14 +335,11 @@ class DatabaseManager:
 
     def reset_database(self):
         """Reset the entire database - DANGEROUS!"""
-        with sqlite3.connect(self.db_path) as conn:
-            # Drop all tables
-            conn.execute("DROP TABLE IF EXISTS partner_balances")
-            conn.execute("DROP TABLE IF EXISTS transactions")
-            conn.execute("DROP TABLE IF EXISTS categories")
-            conn.execute("DROP TABLE IF EXISTS users")
+        # Drop the entire database file and recreate it
+        if self.db_path.exists():
+            self.db_path.unlink()
+        logger.warning("Database file deleted!")
 
-            # Recreate tables
-            self._create_tables()
-            conn.commit()
-        logger.warning("Database has been completely reset!")
+        # Recreate database using the same initialization logic
+        self._initialize_database()
+        logger.warning("Database has been completely reset and recreated!")
