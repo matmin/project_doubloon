@@ -10,13 +10,12 @@ import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from core.database import DatabaseManager
-from providers.base import PROVIDERS, register_provider
-from providers.intesa_excel import IntesaExcelProvider
+from providers import PROVIDERS, register_all_providers
 from services.auth import AuthService
 from services.categories import CategoryService
 from services.transactions import TransactionFilters, TransactionService
 
-register_provider(IntesaExcelProvider())
+register_all_providers()
 
 _auth = AuthService()
 _cat_svc = CategoryService()

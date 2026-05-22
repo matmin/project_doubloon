@@ -13,12 +13,17 @@
     {
       "name": "Investimenti",
       "type": "investment",
-      "subcategories": ["Scalable Capital", "Trade Republic", "Altri Investimenti", "Pensione Integrativa"]
+      "subcategories": ["Scalable Capital", "Trade Republic", "Revolut Invest", "Altri Investimenti", "Pensione Integrativa"]
     },
     {
       "name": "Trasferimenti",
       "type": "transfer",
       "subcategories": ["Bonifici", "Ricariche", "Rimborsi", "Prelievi ATM"]
+    },
+    {
+      "name": "Spese Lavoro",
+      "type": "work",
+      "subcategories": ["Trasferte", "Pasti business", "Trasporti business", "Software/Servizi", "Materiale ufficio", "Altri rimborsabili"]
     }
   ]
 }

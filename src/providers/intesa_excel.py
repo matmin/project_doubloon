@@ -2,6 +2,8 @@ from typing import Any, Dict, Iterable
 
 import pandas as pd
 
+from utils.parsing import parse_amount_smart
+
 
 class IntesaExcelProvider:
     name = "intesa_excel"
@@ -34,73 +36,6 @@ class IntesaExcelProvider:
         except Exception:
             return pd.read_excel(xls, sheet_name=0)
 
-    @staticmethod
-    def _parse_amount_smart(x):
-        s = str(x).strip()
-        if s == "" or s.lower() == "nan":
-            return None
-        # normalize spaces and sign
-        s = s.replace("\u00A0", "").replace(" ", "")
-        sign = 1
-        if s.startswith("+"):
-            s = s[1:]
-        if s.startswith("-"):
-            sign = -1
-            s = s[1:]
-        if s.endswith("-"):
-            sign *= -1
-            s = s[:-1]
-        # find separators
-        dot_pos = [i for i, ch in enumerate(s) if ch == "."]
-        comma_pos = [i for i, ch in enumerate(s) if ch == ","]
-        if dot_pos and comma_pos:
-            # rightmost separator is decimal
-            last_dot = dot_pos[-1]
-            last_comma = comma_pos[-1]
-            dec_index = last_dot if last_dot > last_comma else last_comma
-            dec_char = s[dec_index]
-            # remove all other separators except the decimal one
-            cleaned = []
-            for i, ch in enumerate(s):
-                if ch in ",." and i != dec_index:
-                    continue
-                cleaned.append(ch)
-            s2 = "".join(cleaned)
-            if dec_char == ",":
-                s2 = s2.replace(",", ".")
-            # else dec_char == '.' already dot
-        else:
-            # only one kind of separator or none
-            if dot_pos or comma_pos:
-                pos_list = dot_pos or comma_pos
-                sep_char = "." if dot_pos else ","
-                if len(pos_list) > 1:
-                    # multiple same separators: last is decimal, others thousands
-                    last = pos_list[-1]
-                    cleaned = []
-                    for i, ch in enumerate(s):
-                        if ch == sep_char and i != last:
-                            continue
-                        cleaned.append(ch)
-                    s2 = "".join(cleaned)
-                    if sep_char == ",":
-                        s2 = s2.replace(",", ".")
-                else:
-                    idx = pos_list[0]
-                    digits_after = len(s) - idx - 1
-                    # treat as decimal if there are 1-3 digits after; else treat as thousands
-                    if 1 <= digits_after <= 3:
-                        s2 = s.replace(",", ".") if sep_char == "," else s
-                    else:
-                        # thousands separator only
-                        s2 = s.replace(sep_char, "")
-            else:
-                s2 = s
-        try:
-            return sign * float(s2)
-        except Exception:
-            return None
-
     def parse(self, file_obj) -> Iterable[Dict[str, Any]]:
         df = self._read_with_header_detection(file_obj)
         # normalize expected columns exactly as in the provided list
@@ -127,7 +62,7 @@ class IntesaExcelProvider:
 
         for _, row in df.iterrows():
             raw_amount = row.get("Importo")
-            parsed_amount = self._parse_amount_smart(raw_amount)
+            parsed_amount = parse_amount_smart(raw_amount)
             data = {
                 "transaction_date": (
                     pd.to_datetime(row.get("Data"), errors="coerce").date().isoformat()
