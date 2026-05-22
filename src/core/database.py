@@ -619,3 +619,172 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cur = conn.execute(query, params)
             return [dict(r) for r in cur.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Work expenses & reimbursements (Fase 3)
+    # ------------------------------------------------------------------
+
+    def mark_work_expense(
+        self,
+        tx_id: int,
+        status: str = "pending",
+        amount: float | None = None,
+        notes: str | None = None,
+    ) -> int:
+        with self.get_connection() as conn:
+            conn.execute(
+                """UPDATE transactions SET
+                    is_work_expense=1,
+                    reimbursement_status=?,
+                    reimbursement_amount=COALESCE(?,reimbursement_amount),
+                    reimbursement_notes=COALESCE(?,reimbursement_notes),
+                    updated_at=CURRENT_TIMESTAMP
+                WHERE id=?""",
+                (status, amount, notes, tx_id),
+            )
+            conn.commit()
+            return conn.execute("SELECT changes()").fetchone()[0]
+
+    def update_reimbursement_status(
+        self,
+        tx_id: int,
+        status: str,
+        reimbursement_date: str | None = None,
+        amount: float | None = None,
+        notes: str | None = None,
+    ) -> int:
+        with self.get_connection() as conn:
+            conn.execute(
+                """UPDATE transactions SET
+                    reimbursement_status=?,
+                    reimbursement_date=COALESCE(?,reimbursement_date),
+                    reimbursement_amount=COALESCE(?,reimbursement_amount),
+                    reimbursement_notes=COALESCE(?,reimbursement_notes),
+                    updated_at=CURRENT_TIMESTAMP
+                WHERE id=?""",
+                (status, reimbursement_date, amount, notes, tx_id),
+            )
+            conn.commit()
+            return conn.execute("SELECT changes()").fetchone()[0]
+
+    def link_reimbursement(
+        self,
+        reimbursement_tx_id: int,
+        expense_tx_id: int,
+        allocated_amount: float | None = None,
+    ) -> int:
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                """INSERT INTO reimbursement_links
+                    (reimbursement_transaction_id, expense_transaction_id, allocated_amount)
+                   VALUES (?,?,?)
+                   ON CONFLICT(reimbursement_transaction_id, expense_transaction_id)
+                   DO UPDATE SET allocated_amount=excluded.allocated_amount""",
+                (reimbursement_tx_id, expense_tx_id, allocated_amount),
+            )
+            conn.commit()
+            # Auto-mark expense as reimbursed with today's date
+            conn.execute(
+                """UPDATE transactions SET
+                    reimbursement_status='reimbursed',
+                    reimbursement_date=COALESCE(reimbursement_date, date('now')),
+                    updated_at=CURRENT_TIMESTAMP
+                WHERE id=?""",
+                (expense_tx_id,),
+            )
+            conn.commit()
+            return cur.lastrowid
+
+    def unlink_reimbursement(self, reimbursement_tx_id: int, expense_tx_id: int) -> None:
+        with self.get_connection() as conn:
+            conn.execute(
+                "DELETE FROM reimbursement_links WHERE reimbursement_transaction_id=? AND expense_transaction_id=?",
+                (reimbursement_tx_id, expense_tx_id),
+            )
+            # Revert status to submitted if no more links
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM reimbursement_links WHERE expense_transaction_id=?",
+                (expense_tx_id,),
+            )
+            if cur.fetchone()[0] == 0:
+                conn.execute(
+                    "UPDATE transactions SET reimbursement_status='submitted', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (expense_tx_id,),
+                )
+            conn.commit()
+
+    def get_work_expenses(
+        self,
+        user_id: int | None = None,
+        status: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list[dict]:
+        query = """
+            SELECT t.*, c.name as category_name
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            WHERE t.is_work_expense = 1
+        """
+        params: list = []
+        if user_id:
+            query += " AND t.user_id = ?"
+            params.append(user_id)
+        if status:
+            query += " AND t.reimbursement_status = ?"
+            params.append(status)
+        if start_date:
+            query += " AND t.transaction_date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND t.transaction_date <= ?"
+            params.append(end_date)
+        query += " ORDER BY t.transaction_date DESC"
+        with self.get_connection() as conn:
+            cur = conn.execute(query, params)
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_reimbursement_summary(self, user_id: int) -> dict:
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                """SELECT
+                    SUM(CASE WHEN reimbursement_status='pending' THEN ABS(amount) ELSE 0 END) as pending_total,
+                    SUM(CASE WHEN reimbursement_status='submitted' THEN ABS(amount) ELSE 0 END) as submitted_total,
+                    SUM(CASE WHEN reimbursement_status='reimbursed'
+                        AND reimbursement_date >= strftime('%Y-01-01','now')
+                        THEN COALESCE(reimbursement_amount, ABS(amount)) ELSE 0 END) as reimbursed_ytd,
+                    COUNT(CASE WHEN reimbursement_status='pending' THEN 1 END) as pending_count,
+                    COUNT(CASE WHEN reimbursement_status='submitted' THEN 1 END) as submitted_count
+                FROM transactions
+                WHERE user_id=? AND is_work_expense=1""",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else {}
+
+    def get_unlinked_reimbursements(self, user_id: int) -> list[dict]:
+        """Return income transactions not yet linked to any expense (potential reimbursement bonuses)."""
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                """SELECT t.* FROM transactions t
+                   WHERE t.user_id=? AND t.amount > 0
+                   AND NOT EXISTS (
+                       SELECT 1 FROM reimbursement_links rl
+                       WHERE rl.reimbursement_transaction_id = t.id
+                   )
+                   ORDER BY t.transaction_date DESC
+                   LIMIT 100""",
+                (user_id,),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_reimbursement_links(self, reimbursement_tx_id: int) -> list[dict]:
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                """SELECT rl.*, t.transaction_date, t.amount, t.description
+                   FROM reimbursement_links rl
+                   JOIN transactions t ON rl.expense_transaction_id = t.id
+                   WHERE rl.reimbursement_transaction_id=?""",
+                (reimbursement_tx_id,),
+            )
+            return [dict(r) for r in cur.fetchall()]
