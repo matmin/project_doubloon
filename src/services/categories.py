@@ -2,7 +2,7 @@ from typing import Optional
 
 
 class CategoryService:
-    ALL = ["Necessità", "Extra", "Investimenti", "Trasferimenti"]
+    ALL = ["Necessità", "Extra", "Investimenti", "Trasferimenti", "Spese Lavoro"]
 
     _RULES: list[tuple] = [
         (lambda t: "affitto" in t or "mutuo" in t, "Necessità"),
@@ -12,6 +12,7 @@ class CategoryService:
         (lambda t: "shopping" in t or "zara" in t or "amazon" in t, "Extra"),
         (lambda t: "trade republic" in t or "scalable" in t, "Investimenti"),
         (lambda t: "bonifico" in t or "trasfer" in t, "Trasferimenti"),
+        (lambda t: "taxi" in t or "trasfert" in t or "rimborso nota spese" in t or "anticip" in t, "Spese Lavoro"),
     ]
 
     def categorize(
