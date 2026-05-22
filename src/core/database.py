@@ -357,3 +357,265 @@ class DatabaseManager:
         # Recreate database using the same initialization logic
         self._initialize_database()
         logger.warning("Database has been completely reset and recreated!")
+
+    # ------------------------------------------------------------------
+    # Investment transactions
+    # ------------------------------------------------------------------
+
+    def upsert_investment_transaction(self, user_id: int, data: dict) -> tuple[bool, int]:
+        """Insert investment transaction with dedup on (user_id, source_bank, external_id)."""
+        external_id = data.get("external_id")
+        source_bank = data.get("source_bank")
+        if external_id and source_bank:
+            with self.get_connection() as conn:
+                cur = conn.execute(
+                    "SELECT id FROM transactions WHERE user_id=? AND source_bank=? AND external_id=?",
+                    (user_id, source_bank, external_id),
+                )
+                row = cur.fetchone()
+                if row:
+                    return False, row[0]
+        # Fallback dedup: date + amount + description
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                "SELECT id FROM transactions WHERE user_id=? AND transaction_date=? AND amount=? AND description=? LIMIT 1",
+                (user_id, data["transaction_date"], data["amount"], data["description"]),
+            )
+            if cur.fetchone():
+                return False, -1
+
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                """INSERT INTO transactions (
+                    user_id, transaction_date, amount, description, currency,
+                    import_source, original_data, transaction_type, source_bank,
+                    external_id, isin, asset_type, shares, price_per_share, fee, tax
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    user_id,
+                    data["transaction_date"],
+                    data["amount"],
+                    data.get("description", ""),
+                    data.get("currency", "EUR"),
+                    data.get("source_bank"),
+                    data.get("original_data"),
+                    data.get("transaction_type", "investment"),
+                    source_bank,
+                    external_id,
+                    data.get("isin"),
+                    data.get("asset_type"),
+                    data.get("shares"),
+                    data.get("price_per_share"),
+                    data.get("fee", 0),
+                    data.get("tax", 0),
+                ),
+            )
+            conn.commit()
+            return True, cur.lastrowid
+
+    def get_investment_transactions(
+        self,
+        user_id: int,
+        broker: str | None = None,
+        isin: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list[dict]:
+        query = """
+            SELECT * FROM transactions
+            WHERE user_id = ? AND transaction_type = 'investment'
+        """
+        params: list = [user_id]
+        if broker:
+            query += " AND source_bank = ?"
+            params.append(broker)
+        if isin:
+            query += " AND isin = ?"
+            params.append(isin)
+        if start_date:
+            query += " AND transaction_date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND transaction_date <= ?"
+            params.append(end_date)
+        query += " ORDER BY transaction_date ASC"
+        with self.get_connection() as conn:
+            cur = conn.execute(query, params)
+            return [dict(r) for r in cur.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Portfolio positions
+    # ------------------------------------------------------------------
+
+    def upsert_portfolio_position(self, pos: dict) -> int:
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                "SELECT id FROM portfolio_positions WHERE user_id=? AND isin=? AND broker=?",
+                (pos["user_id"], pos.get("isin"), pos.get("broker")),
+            )
+            row = cur.fetchone()
+            if row:
+                conn.execute(
+                    """UPDATE portfolio_positions SET
+                        ticker=?, asset_name=?, asset_type=?, shares=?,
+                        avg_cost_per_share=?, total_cost_basis=?, is_active=?,
+                        last_updated=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                    (
+                        pos.get("ticker"),
+                        pos.get("asset_name", ""),
+                        pos.get("asset_type"),
+                        pos.get("shares", 0),
+                        pos.get("avg_cost_per_share"),
+                        pos.get("total_cost_basis"),
+                        1 if pos.get("is_active", True) else 0,
+                        row[0],
+                    ),
+                )
+                conn.commit()
+                return row[0]
+            cur = conn.execute(
+                """INSERT INTO portfolio_positions (
+                    user_id, isin, ticker, asset_name, asset_type, broker,
+                    shares, avg_cost_per_share, total_cost_basis, is_active
+                ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    pos["user_id"],
+                    pos.get("isin"),
+                    pos.get("ticker"),
+                    pos.get("asset_name", ""),
+                    pos.get("asset_type"),
+                    pos.get("broker", "Unknown"),
+                    pos.get("shares", 0),
+                    pos.get("avg_cost_per_share"),
+                    pos.get("total_cost_basis"),
+                    1 if pos.get("is_active", True) else 0,
+                ),
+            )
+            conn.commit()
+            return cur.lastrowid
+
+    def get_portfolio_positions(self, user_id: int) -> list[dict]:
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                "SELECT * FROM portfolio_positions WHERE user_id=? ORDER BY is_active DESC, total_cost_basis DESC",
+                (user_id,),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def update_position_price(self, position_id: int, price: float) -> None:
+        from datetime import date
+        with self.get_connection() as conn:
+            conn.execute(
+                "UPDATE portfolio_positions SET current_price=?, current_price_date=?, last_updated=CURRENT_TIMESTAMP WHERE id=?",
+                (price, date.today().isoformat(), position_id),
+            )
+            conn.commit()
+
+    # ------------------------------------------------------------------
+    # Price history / ISIN cache
+    # ------------------------------------------------------------------
+
+    def save_price(self, isin: str, ticker: str, price_date: str, price: float) -> None:
+        with self.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO price_history (isin, ticker, price_date, price)
+                   VALUES (?,?,?,?)
+                   ON CONFLICT(isin, ticker, price_date) DO UPDATE SET price=excluded.price""",
+                (isin, ticker, price_date, price),
+            )
+            conn.commit()
+
+    def get_latest_price(self, isin: str) -> dict | None:
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                "SELECT * FROM price_history WHERE isin=? ORDER BY price_date DESC LIMIT 1",
+                (isin,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def save_isin_ticker(self, isin: str, ticker: str, source: str = "manual") -> None:
+        with self.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO isin_ticker_cache (isin, ticker, source)
+                   VALUES (?,?,?)
+                   ON CONFLICT(isin) DO UPDATE SET ticker=excluded.ticker, source=excluded.source,
+                   updated_at=CURRENT_TIMESTAMP""",
+                (isin, ticker, source),
+            )
+            conn.commit()
+
+    def get_isin_ticker(self, isin: str) -> str | None:
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                "SELECT ticker FROM isin_ticker_cache WHERE isin=?",
+                (isin,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+
+    # ------------------------------------------------------------------
+    # Networth snapshots
+    # ------------------------------------------------------------------
+
+    def upsert_networth_snapshot(self, user_id: int, data: dict) -> int:
+        with self.get_connection() as conn:
+            net = (
+                float(data.get("cash_amount", 0))
+                + float(data.get("investments_amount", 0))
+                + float(data.get("real_estate_amount", 0))
+                + float(data.get("other_assets_amount", 0))
+                - float(data.get("mortgage_debt", 0))
+                - float(data.get("other_debts", 0))
+            )
+            conn.execute(
+                """INSERT INTO networth_snapshots (
+                    user_id, snapshot_date, cash_amount, investments_amount,
+                    real_estate_amount, other_assets_amount, mortgage_debt,
+                    other_debts, net_worth, source, notes
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(user_id, snapshot_date) DO UPDATE SET
+                    cash_amount=excluded.cash_amount,
+                    investments_amount=excluded.investments_amount,
+                    real_estate_amount=excluded.real_estate_amount,
+                    other_assets_amount=excluded.other_assets_amount,
+                    mortgage_debt=excluded.mortgage_debt,
+                    other_debts=excluded.other_debts,
+                    net_worth=excluded.net_worth,
+                    source=excluded.source,
+                    notes=excluded.notes""",
+                (
+                    user_id,
+                    data["snapshot_date"],
+                    data.get("cash_amount", 0),
+                    data.get("investments_amount", 0),
+                    data.get("real_estate_amount", 0),
+                    data.get("other_assets_amount", 0),
+                    data.get("mortgage_debt", 0),
+                    data.get("other_debts", 0),
+                    net,
+                    data.get("source", "manual"),
+                    data.get("notes"),
+                ),
+            )
+            conn.commit()
+            cur = conn.execute(
+                "SELECT id FROM networth_snapshots WHERE user_id=? AND snapshot_date=?",
+                (user_id, data["snapshot_date"]),
+            )
+            return cur.fetchone()[0]
+
+    def get_networth_snapshots(
+        self, user_id: int, start_date: str | None = None, limit: int = 200
+    ) -> list[dict]:
+        query = "SELECT * FROM networth_snapshots WHERE user_id=?"
+        params: list = [user_id]
+        if start_date:
+            query += " AND snapshot_date >= ?"
+            params.append(start_date)
+        query += " ORDER BY snapshot_date DESC LIMIT ?"
+        params.append(limit)
+        with self.get_connection() as conn:
+            cur = conn.execute(query, params)
+            return [dict(r) for r in cur.fetchall()]
