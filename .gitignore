@@ -46,3 +46,6 @@ htmlcov/
 # VSCode / IDE
 .vscode/
 .idea/
+
+# User credentials (never commit)
+config/users.json
